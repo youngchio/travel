@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>LA 실시간 여행 대시보드 (Pro 버젼)</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- FontAwesome & Leaflet CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <!-- Optimized Fonts (Inter + Pretendard) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
+
+    <!-- Leaflet JS & Sortable JS (for Drag & Drop) -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+
+    <style>
+        body { font-family: 'Inter', 'Pretendard', -apple-system, sans-serif; -webkit-tap-highlight-color: transparent; }
+        
+        /* Mobile Optimization & Custom Scrollbar */
+        .custom-scrollbar::-webkit-scrollbar { width: 0px; height: 0px; display: none; }
+        .custom-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        /* Map Styles */
+        #map { height: 100%; width: 100%; outline: none; border-radius: inherit; z-index: 10;}
+        .leaflet-control-zoom { border: none !important; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1) !important; margin-bottom: 20px !important;}
+        .leaflet-bar a { background-color: #111827 !important; color: white !important; border: none !important; }
+        
+        /* Mobile layout adjustments */
+        @media (max-width: 768px) {
+            .mobile-map-first { flex-direction: column-reverse; }
+        }
+
+        /* Animations */
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
+        .sortable-ghost { opacity: 0.2; background-color: #000; border-radius: 12px; }
+        .sortable-drag { cursor: grabbing !important; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25); transform: scale(1.02); }
+        .sync-spin { animation: spin 1s linear infinite; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+
+<body class="bg-gray-100 text-gray-900 h-[100dvh] w-screen p-0 md:p-3 flex flex-col md:flex-row gap-0 md:gap-3 overflow-hidden box-border">
+
+    <!-- 1. Left Vertical GNB (Mobile: Bottom/Top Nav) -->
+    <nav class="w-full md:w-16 bg-black md:rounded-2xl shadow-2xl flex md:flex-col items-center justify-between py-2 md:py-6 px-4 md:px-0 flex-shrink-0 z-30 transition-all order-1 md:order-none pb-safe">
+        
+        <div class="flex md:flex-col items-center gap-2 md:gap-4 w-full md:w-auto overflow-x-auto custom-scrollbar">
+            <div class="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm flex-shrink-0 mb-0 md:mb-2 cursor-pointer" onclick="resetData()">
+                <i class="fa-solid fa-plane text-black text-lg"></i>
+            </div>
+            
+            <button onclick="switchDay(1)" id="tab-1" class="day-tab w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs bg-white text-black flex-shrink-0 shadow-md">D1</button>
+            <button onclick="switchDay(2)" id="tab-2" class="day-tab w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs bg-gray-900 text-gray-400 flex-shrink-0">D2</button>
+            <button onclick="switchDay(3)" id="tab-3" class="day-tab w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs bg-gray-900 text-gray-400 flex-shrink-0">D3</button>
+            <button onclick="switchDay(4)" id="tab-4" class="day-tab w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs bg-gray-900 text-gray-400 flex-shrink-0">D4</button>
+            <button onclick="switchDay(5)" id="tab-5" class="day-tab w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs bg-gray-900 text-gray-400 flex-shrink-0">D5</button>
+        </div>
+
+        <div class="flex md:flex-col gap-2 mt-0 md:mt-auto flex-shrink-0 ml-auto md:ml-0">
+            <button onclick="openTipsModal()" class="w-10 h-10 rounded-full bg-gray-900 text-gray-400 hover:bg-gray-800 hover:text-yellow-400 flex items-center justify-center transition-all">
+                <i class="fa-solid fa-lightbulb"></i>
+            </button>
+            <button onclick="openBudgetModal()" class="w-10 h-10 rounded-full bg-gray-800 text-white hover:bg-gray-700 flex items-center justify-center transition-all shadow-md relative">
+                <i class="fa-solid fa-wallet"></i>
+                <span id="sync-status" class="absolute -top-1 -right-1 w-3 h-3 bg-green-500 border-2 border-black rounded-full hidden"></span>
+            </button>
+        </div>
+    </nav>
+
+    <!-- Content Wrapper for Mobile Map-First structure -->
+    <div class="flex-1 flex flex-col md:flex-row gap-0 md:gap-3 overflow-hidden mobile-map-first h-full w-full">
+        
+        <!-- 2. Timeline Dashboard (List View) -->
+        <aside class="w-full md:w-[360px] bg-gray-50 md:bg-transparent flex flex-col gap-3 flex-shrink-0 h-[45%] md:h-full z-20 pt-3 md:pt-0 px-3 md:px-0 rounded-t-3xl md:rounded-none relative">
+            
+            <div class="bg-white rounded-2xl p-3 md:p-4 shadow-sm border border-gray-200 flex items-center justify-between flex-shrink-0">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 bg-black rounded-lg flex items-center justify-center text-white"><i class="fa-solid fa-layer-group text-xs"></i></div>
+                    <h1 class="font-bold text-base tracking-tight text-gray-900">LA Planner Pro</h1>
+                </div>
+                <div class="text-[10px] md:text-xs font-bold text-gray-400 flex items-center gap-1" id="cloud-indicator">
+                    <i class="fa-solid fa-cloud"></i> Syncing...
+                </div>
+            </div>
+
+            <div id="day-summary-container" class="bg-black text-white rounded-2xl p-4 md:p-5 shadow-lg relative overflow-hidden flex-shrink-0">
+                <div class="absolute -top-10 -right-10 w-32 h-32 bg-gray-800 rounded-full blur-3xl opacity-50"></div>
+                <div class="relative z-10 flex flex-col gap-2">
+                    <div>
+                        <span id="summary-date" class="text-[10px] font-bold text-gray-400 tracking-wider uppercase block"></span>
+                        <h2 id="summary-title" class="text-lg md:text-xl font-black leading-tight mt-1"></h2>
+                    </div>
+                    <p id="summary-subtitle" class="text-[11px] md:text-xs text-gray-300 font-medium"></p>
+                </div>
+            </div>
+
+            <!-- Scrollable Timeline -->
+            <div class="flex-1 overflow-y-auto custom-scrollbar pb-10 space-y-2 pr-1" id="places-container">
+                <!-- Items injected here via JS -->
+            </div>
+
+            <!-- Add New Place Button (Floating at bottom of timeline) -->
+            <button onclick="openAddPlaceModal()" class="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black text-white px-5 py-2.5 rounded-full shadow-xl font-bold text-xs flex items-center gap-2 hover:scale-105 transition-transform z-30 border-2 border-white/20">
+                <i class="fa-solid fa-plus"></i> 일정 추가
+            </button>
+        </aside>
+
+        <!-- 3. Right Map Viewport -->
+        <main class="flex-1 h-[55%] md:h-full bg-gray-200 md:rounded-2xl shadow-sm border-b md:border border-gray-200 overflow-hidden relative z-10">
+            <div id="map"></div>
+
+            <!-- Smart Widget -->
+            <div class="absolute top-3 left-3 z-[1000] bg-white/90 backdrop-blur-md rounded-xl p-2 md:p-3 shadow-lg border border-gray-100 flex flex-col gap-1.5 pointer-events-none">
+                <div class="flex items-center gap-2">
+                    <i class="fa-solid fa-sun text-orange-500 text-base md:text-lg"></i>
+                    <div>
+                        <div class="text-[9px] md:text-[10px] font-bold text-gray-500 uppercase leading-none">Los Angeles</div>
+                        <div class="text-xs md:text-sm font-black text-gray-900">24°C Sunny</div>
+                    </div>
+                </div>
+                <div class="h-[1px] bg-gray-200 w-full"></div>
+                <div class="flex items-center gap-1.5 text-[10px] md:text-xs font-semibold text-gray-700">
+                    <i class="fa-solid fa-moon text-indigo-500"></i> Sunset: 6:52 PM
+                </div>
+            </div>
+
+            <!-- Map Toggles (Danger Zones & POIs) -->
+            <div class="absolute top-3 right-3 z-[1000] flex flex-col gap-2">
+                <label class="bg-white rounded-xl p-2 shadow-md border border-gray-100 flex items-center cursor-pointer">
+                    <input type="checkbox" id="toggle-skidrow" checked onchange="toggleLayers()" class="sr-only peer">
+                    <div class="w-7 h-4 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[10px] after:left-[10px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-red-500 relative"></div>
+                    <span class="ml-2 text-[10px] font-bold text-gray-700"><i class="fa-solid fa-shield-halved text-red-500"></i> 우범지역</span>
+                </label>
+                
+                <label class="bg-white rounded-xl p-2 shadow-md border border-gray-100 flex items-center cursor-pointer">
+                    <input type="checkbox" id="toggle-pois" checked onchange="toggleLayers()" class="sr-only peer">
+                    <div class="w-7 h-4 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[10px] after:left-[10px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-500 relative"></div>
+                    <span class="ml-2 text-[10px] font-bold text-gray-700"><i class="fa-solid fa-square-parking text-blue-500"></i> 마트/주차</span>
+                </label>
+
+                <label class="bg-white rounded-xl p-2 shadow-md border border-gray-100 flex items-center cursor-pointer">
+                    <input type="checkbox" id="toggle-restrooms" checked onchange="toggleLayers()" class="sr-only peer">
+                    <div class="w-7 h-4 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[10px] after:left-[10px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-teal-500 relative"></div>
+                    <span class="ml-2 text-[10px] font-bold text-gray-700"><i class="fa-solid fa-restroom text-teal-500"></i> 화장실</span>
+                </label>
+            </div>
+        </main>
+    </div>
+
+    <!-- Add Custom Place Modal -->
+    <div id="add-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[3000] hidden flex-col items-center justify-center p-4">
+        <div class="absolute inset-0 z-0" onclick="closeAddPlaceModal()"></div>
+        <div class="bg-white rounded-[24px] w-full max-w-sm flex flex-col shadow-2xl relative z-10 animate-fade-in p-6">
+            <h2 class="text-lg font-black mb-4">새로운 일정 추가</h2>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 mb-1">아이콘 선택</label>
+                    <div class="flex gap-2 overflow-x-auto custom-scrollbar pb-1">
+                        <label class="cursor-pointer flex-shrink-0"><input type="radio" name="new-icon" value="fa-map-pin" class="sr-only peer" checked><div class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 peer-checked:bg-black peer-checked:text-white transition-colors"><i class="fa-solid fa-map-pin"></i></div></label>
+                        <label class="cursor-pointer flex-shrink-0"><input type="radio" name="new-icon" value="fa-utensils" class="sr-only peer"><div class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 peer-checked:bg-black peer-checked:text-white transition-colors"><i class="fa-solid fa-utensils"></i></div></label>
+                        <label class="cursor-pointer flex-shrink-0"><input type="radio" name="new-icon" value="fa-mug-hot" class="sr-only peer"><div class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 peer-checked:bg-black peer-checked:text-white transition-colors"><i class="fa-solid fa-mug-hot"></i></div></label>
+                        <label class="cursor-pointer flex-shrink-0"><input type="radio" name="new-icon" value="fa-bag-shopping" class="sr-only peer"><div class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 peer-checked:bg-black peer-checked:text-white transition-colors"><i class="fa-solid fa-bag-shopping"></i></div></label>
+                        <label class="cursor-pointer flex-shrink-0"><input type="radio" name="new-icon" value="fa-camera" class="sr-only peer"><div class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 peer-checked:bg-black peer-checked:text-white transition-colors"><i class="fa-solid fa-camera"></i></div></label>
+                        <label class="cursor-pointer flex-shrink-0"><input type="radio" name="new-icon" value="fa-car" class="sr-only peer"><div class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 peer-checked:bg-black peer-checked:text-white transition-colors"><i class="fa-solid fa-car"></i></div></label>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 mb-1">장소명</label>
+                    <input type="text" id="new-place-name" placeholder="예: 블루보틀 커피" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm font-semibold focus:border-black focus:outline-none">
+                </div>
+                <div class="flex gap-3">
+                    <div class="flex-1">
+                        <label class="block text-xs font-bold text-gray-600 mb-1">시간 (선택)</label>
+                        <input type="time" id="new-place-time" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm font-semibold focus:border-black focus:outline-none">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 mb-1">상세 위치 / 메모</label>
+                    <textarea id="new-place-note" placeholder="주소나 할 일을 적어주세요" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm font-semibold focus:border-black focus:outline-none h-20 resize-none"></textarea>
+                </div>
+            </div>
+            <div class="mt-6 flex gap-2">
+                <button onclick="closeAddPlaceModal()" class="flex-1 py-3 rounded-xl font-bold text-sm bg-gray-100 text-gray-600">취소</button>
+                <button id="add-place-btn" onclick="saveNewPlace()" class="flex-1 py-3 rounded-xl font-bold text-sm bg-black text-white">추가하기</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Place Modal -->
+    <div id="edit-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[3000] hidden flex-col items-center justify-center p-4">
+        <div class="absolute inset-0 z-0" onclick="closeEditPlaceModal()"></div>
+        <div class="bg-white rounded-[24px] w-full max-w-sm flex flex-col shadow-2xl relative z-10 animate-fade-in p-6">
+            <h2 class="text-lg font-black mb-4">일정 수정</h2>
+            <input type="hidden" id="edit-place-id">
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 mb-1">아이콘 변경</label>
+                    <div class="flex gap-2 overflow-x-auto custom-scrollbar pb-1">
+                        <label class="cursor-pointer flex-shrink-0"><input type="radio" name="edit-icon" value="fa-map-pin" class="sr-only peer" checked><div class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 peer-checked:bg-black peer-checked:text-white transition-colors"><i class="fa-solid fa-map-pin"></i></div></label>
+                        <label class="cursor-pointer flex-shrink-0"><input type="radio" name="edit-icon" value="fa-utensils" class="sr-only peer"><div class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 peer-checked:bg-black peer-checked:text-white transition-colors"><i class="fa-solid fa-utensils"></i></div></label>
+                        <label class="cursor-pointer flex-shrink-0"><input type="radio" name="edit-icon" value="fa-mug-hot" class="sr-only peer"><div class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 peer-checked:bg-black peer-checked:text-white transition-colors"><i class="fa-solid fa-mug-hot"></i></div></label>
+                        <label class="cursor-pointer flex-shrink-0"><input type="radio" name="edit-icon" value="fa-bag-shopping" class="sr-only peer"><div class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 peer-checked:bg-black peer-checked:text-white transition-colors"><i class="fa-solid fa-bag-shopping"></i></div></label>
+                        <label class="cursor-pointer flex-shrink-0"><input type="radio" name="edit-icon" value="fa-camera" class="sr-only peer"><div class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 peer-checked:bg-black peer-checked:text-white transition-colors"><i class="fa-solid fa-camera"></i></div></label>
+                        <label class="cursor-pointer flex-shrink-0"><input type="radio" name="edit-icon" value="fa-car" class="sr-only peer"><div class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 peer-checked:bg-black peer-checked:text-white transition-colors"><i class="fa-solid fa-car"></i></div></label>
+                        <label class="cursor-pointer flex-shrink-0"><input type="radio" name="edit-icon" value="fa-person-walking" class="sr-only peer"><div class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 peer-checked:bg-black peer-checked:text-white transition-colors"><i class="fa-solid fa-person-walking"></i></div></label>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 mb-1">장소명</label>
+                    <input type="text" id="edit-place-name" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm font-semibold focus:border-black focus:outline-none">
+                </div>
+                <div class="flex gap-3">
+                    <div class="flex-1">
+                        <label class="block text-xs font-bold text-gray-600 mb-1">시간 지정 (고정)</label>
+                        <input type="time" id="edit-place-time" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm font-semibold focus:border-black focus:outline-none">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 mb-1">상세 위치 / 메모</label>
+                    <textarea id="edit-place-note" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm font-semibold focus:border-black focus:outline-none h-20 resize-none"></textarea>
+                </div>
+            </div>
+            <div class="mt-6 flex gap-2">
+                <button onclick="closeEditPlaceModal()" class="flex-1 py-3 rounded-xl font-bold text-sm bg-gray-100 text-gray-600">취소</button>
+                <button onclick="saveEditPlace()" class="flex-1 py-3 rounded-xl font-bold text-sm bg-black text-white">저장하기</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- USA Travel Tips Modal -->
+    <div id="tips-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[3000] hidden flex-col items-center justify-center p-0 md:p-4">
+        <div class="absolute inset-0 z-0" onclick="closeTipsModal()"></div>
+        <div class="bg-white md:rounded-[24px] rounded-t-[24px] w-full max-w-2xl h-[85vh] md:h-auto max-h-[100dvh] md:max-h-[85vh] mt-auto md:mt-0 flex flex-col shadow-2xl overflow-hidden relative z-10 animate-fade-in">
+            <div class="p-4 md:p-6 bg-black text-white flex justify-between items-center border-b border-gray-800 flex-shrink-0">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 bg-yellow-400 rounded-full flex items-center justify-center text-black"><i class="fa-solid fa-lightbulb"></i></div>
+                    <h2 class="text-lg md:text-xl font-black">미국 LA 여행 생존 꿀팁</h2>
+                </div>
+                <button onclick="closeTipsModal()" class="w-8 h-8 bg-gray-800 rounded-full flex items-center justify-center text-gray-300 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="p-4 md:p-6 overflow-y-auto custom-scrollbar flex-1 space-y-5 bg-gray-50 pb-20 md:pb-6">
+                
+                <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-200">
+                    <h3 class="font-bold text-sm text-red-500 mb-2 flex items-center gap-2"><i class="fa-solid fa-car-burst"></i> 운전 및 렌터카 주의사항</h3>
+                    <ul class="text-xs text-gray-700 space-y-2 font-medium">
+                        <li><b class="text-black">STOP 표지판 무조건 3초 정지:</b> 차가 없어도 무조건 완전히 멈춘 후 마음속으로 3초를 세고 출발하세요. 경찰 단속 시 벌금이 매우 큽니다.</li>
+                        <li><b class="text-black">카풀 차선 (Carpool/HOV):</b> 고속도로 1차선 다이아몬드 표시는 2인 이상 탑승 차량만 이용 가능합니다.</li>
+                        <li><b class="text-black">비보호 좌회전:</b> 파란불일 때 교차로 중간까지 진입 후, 반대편 직진 차가 없을 때 눈치껏 좌회전합니다.</li>
+                    </ul>
+                </div>
+
+                <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-200">
+                    <h3 class="font-bold text-sm text-blue-500 mb-2 flex items-center gap-2"><i class="fa-solid fa-square-parking"></i> 길거리 주차 (연석 색상 확인)</h3>
+                    <ul class="text-xs text-gray-700 space-y-2 font-medium">
+                        <li><b class="text-red-500">빨간색 연석:</b> <b>절대 주차 금지</b> (소방도로, 견인 1순위)</li>
+                        <li><b class="text-green-500">초록색 연석:</b> 제한 시간 내 단기 주차 가능 (표지판 시간 확인)</li>
+                        <li><b class="text-gray-400">흰색/노란색 연석:</b> 동승자 픽업/하차 및 화물 하역만 가능 (주차 금지)</li>
+                        <li><b class="text-black">차량 털이 주의:</b> 차 안에 선글라스, 동전, 가방 등 <b>그 어떤 물건도 보이게 두지 마세요.</b> 유리창을 깨고 훔쳐갑니다. 트렁크에 모두 숨기세요.</li>
+                    </ul>
+                </div>
+
+                <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-200">
+                    <h3 class="font-bold text-sm text-green-500 mb-2 flex items-center gap-2"><i class="fa-solid fa-bolt"></i> 테슬라 전기차 충전 팁</h3>
+                    <p class="text-xs text-gray-700 font-medium leading-relaxed">
+                        차량 내비게이션에서 <b>'Supercharger' (슈퍼차저)</b>를 검색하여 이동하세요. 충전기를 꽂으면 별도 결제 없이 렌터카 계정으로 자동 청구됩니다(후불 청구). 완속 충전기(호텔 등) 이용 시 ChargePoint 앱 등을 설치해야 할 수 있습니다. 배터리는 항상 20% 이상 여유를 두고 충전하세요.
+                    </p>
+                </div>
+
+                <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-200">
+                    <h3 class="font-bold text-sm text-orange-500 mb-2 flex items-center gap-2"><i class="fa-solid fa-money-bill-wave"></i> 미국의 팁(Tip) 문화</h3>
+                    <p class="text-xs text-gray-700 font-medium leading-relaxed">
+                        식당에서 식사 후 웨이터에게 <b>"Check, please" (계산서 주세요)</b>라고 하면 영수증을 줍니다. 영수증에 카드를 꽂아두면 직원이 카드를 가져가 결제 후 다시 가져옵니다. 이때 영수증 하단에 팁(보통 18~20%)과 총액을 직접 적고 서명하고 나오면 됩니다. <b>(우측 메뉴의 지갑 아이콘에서 팁 계산기를 활용해 보세요!)</b> 패스트푸드나 테이크아웃은 팁을 주지 않아도 무방합니다.
+                    </p>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- Custom Confirm Delete Modal -->
+    <div id="delete-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[3000] hidden flex-col items-center justify-center p-4">
+        <div class="bg-white rounded-[24px] w-full max-w-xs flex flex-col shadow-2xl relative z-10 p-6 text-center animate-fade-in">
+            <div class="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3 text-red-500 text-xl"><i class="fa-solid fa-triangle-exclamation"></i></div>
+            <h2 class="text-lg font-black mb-1">일정 삭제</h2>
+            <p class="text-xs text-gray-500 mb-5">정말 이 일정을 삭제하시겠습니까?<br>삭제 후 자동으로 시간이 재계산됩니다.</p>
+            <div class="flex gap-2 w-full">
+                <button onclick="document.getElementById('delete-modal').classList.replace('flex','hidden')" class="flex-1 py-2.5 rounded-xl font-bold text-sm bg-gray-100 text-gray-600">취소</button>
+                <button id="confirm-delete-btn" class="flex-1 py-2.5 rounded-xl font-bold text-sm bg-red-500 text-white">삭제</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Live Budget & Expense Tracker Modal (Unchanged structurally, optimized for mobile) -->
+    <div id="budget-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[2000] hidden flex-col items-center justify-center p-0 md:p-4">
+        <div class="absolute inset-0 z-0" onclick="closeBudgetModal()"></div>
+        <div class="bg-white md:rounded-[24px] rounded-none w-full max-w-2xl h-full md:h-auto max-h-[100dvh] md:max-h-[90vh] flex flex-col shadow-2xl overflow-hidden relative z-10 animate-fade-in">
+            <div class="p-4 md:p-6 bg-white flex justify-between items-center border-b border-gray-100 flex-shrink-0">
+                <h2 class="text-lg md:text-xl font-black text-gray-900">현지 정산표 & 팁 계산기</h2>
+                <button onclick="closeBudgetModal()" class="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center text-gray-600"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="p-4 md:p-6 overflow-y-auto custom-scrollbar flex-1 space-y-4 md:space-y-6 bg-gray-50 pb-20 md:pb-6">
+                
+                <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-3 md:p-4 flex items-center justify-between">
+                    <span class="text-xs font-bold text-yellow-800">🚗 테슬라 렌터카 (현장결제)</span>
+                    <span class="text-sm font-black text-yellow-900">$127.03</span>
+                </div>
+
+                <div class="bg-black text-white rounded-2xl p-4 md:p-5 shadow-md flex justify-between items-center">
+                    <div>
+                        <div class="text-[10px] md:text-xs font-semibold text-gray-400 mb-1">총 예상 현지 지출액 (렌트카 포함)</div>
+                        <div class="text-2xl md:text-3xl font-black" id="total-budget-display">$941.42</div>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-[9px] md:text-[10px] font-bold text-gray-400 mb-1">1인당 정산</div>
+                        <div class="text-lg md:text-xl font-bold text-white" id="per-person-display">$470.71</div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-2xl p-4 md:p-5 shadow-sm border border-gray-200">
+                    <h3 class="font-bold text-xs md:text-sm text-gray-900 mb-3"><i class="fa-solid fa-calculator text-black"></i> Smart Tip Calculator</h3>
+                    <div class="flex flex-col sm:flex-row gap-2">
+                        <input type="number" id="bill-amount" placeholder="영수증 금액 (USD)" class="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:border-black" oninput="calculateTip()">
+                        <div class="flex gap-1 justify-between sm:justify-start">
+                            <button onclick="setTip(15)" class="tip-btn flex-1 sm:flex-none px-3 py-2 rounded-xl text-xs font-bold bg-gray-100 text-gray-600 transition-colors">15%</button>
+                            <button onclick="setTip(18)" class="tip-btn flex-1 sm:flex-none px-3 py-2 rounded-xl text-xs font-bold bg-black text-white transition-colors">18%</button>
+                            <button onclick="setTip(20)" class="tip-btn flex-1 sm:flex-none px-3 py-2 rounded-xl text-xs font-bold bg-gray-100 text-gray-600 transition-colors">20%</button>
+                        </div>
+                    </div>
+                    <div class="mt-3 flex justify-between items-center bg-gray-50 rounded-lg p-3 border border-gray-100">
+                        <span class="text-[11px] font-bold text-gray-500">Total with Tip:</span>
+                        <span class="text-lg font-black text-black" id="tip-total-result">$0.00</span>
+                    </div>
+                </div>
+
+                <div>
+                    <h3 class="font-bold text-xs text-gray-900 mb-2">항목별 예산 명세서 (USD)</h3>
+                    <div class="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                        <table class="w-full text-left text-[11px] md:text-xs">
+                            <tbody class="divide-y divide-gray-100 text-gray-800 font-medium">
+                                <tr><td class="p-2 md:p-3">🏨 호텔 리조트 피 현장결제</td><td class="p-2 md:p-3 text-right font-bold">$149.39</td></tr>
+                                <tr><td class="p-2 md:p-3">🚕 대중교통 & 우버 (절감형)</td><td class="p-2 md:p-3 text-right font-bold">$85.00</td></tr>
+                                <tr><td class="p-2 md:p-3">🅿️ 주차비 & 주유/충전비</td><td class="p-2 md:p-3 text-right font-bold">$60.00</td></tr>
+                                <tr><td class="p-2 md:p-3">🍔 식비 (인앤아웃, 팬다 등 반영)</td><td class="p-2 md:p-3 text-right font-bold">$470.00</td></tr>
+                                <tr><td class="p-2 md:p-3">💵 현금 팁 & 잡비</td><td class="p-2 md:p-3 text-right font-bold">$50.00</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global State Variables
+        let map;
+        let markersGroup, polylineGroup;
+        let dangerZonesLayer, poiLayer, restroomLayer;
+        let currentDay = 1;
+        let sortableInstance = null;
+        let isSyncing = false;
+        let placeToDeleteId = null;
+        
+        let appData = {}; 
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'la-planner-pro';
+        let db, auth, userId;
+
+        // Base Data (Day 1 ~ 5 updated according to previous prompt rules)
+        const baseTripData = {
+            1: { day: 1, date: "9.22 (화)", title: "도심 체크인 & 탐방", subtitle: "LAX 공항 → 빌트모어(짐보관) → 그랜드센트럴마켓",
+                places: [
+                    { id: "1-1", time: "10:00", name: "LAX 공항 도착", lat: 33.9416, lng: -118.4085, icon: "fa-plane-arrival", note: "우버 탑승 ($45)" },
+                    { id: "1-2", time: "10:50", name: "더 빌트모어 호텔", lat: 34.0497, lng: -118.2541, icon: "fa-hotel", note: "짐보관 및 리조트피 ($44.81)" },
+                    { id: "1-3", time: "11:20", name: "Chick-fil-A", lat: 34.0489, lng: -118.2602, icon: "fa-burger", note: "점심 식사" },
+                    { id: "1-4", time: "16:30", name: "더 브로드 미술관", lat: 34.0544, lng: -118.2506, icon: "fa-landmark", note: "무료 예약 입장" },
+                    { id: "1-5", time: "18:15", name: "그랜드 센트럴 마켓", lat: 34.0506, lng: -118.2489, icon: "fa-beer-mug-empty", note: "저녁 식사" }
+                ]
+            },
+            2: { day: 2, date: "9.23 (수)", title: "유니버설 풀타임", subtitle: "IHOP 조식 → 호텔 이동 → 유니버설스튜디오 → 키킨크랩",
+                places: [
+                    { id: "2-1", time: "08:00", name: "IHOP 조식", lat: 34.0459, lng: -118.2618, icon: "fa-pancakes", note: "도보 이동" },
+                    { id: "2-2", time: "09:00", name: "더 빌트모어 체크아웃", lat: 34.0497, lng: -118.2541, icon: "fa-suitcase", note: "지하철 D Line 이동 ($3.50)" },
+                    { id: "2-3", time: "09:30", name: "더 라인 호텔 짐보관", lat: 34.0618, lng: -118.3002, icon: "fa-hotel", note: "리조트피 ($104.58). B Line 탑승" },
+                    { id: "2-4", time: "10:15", name: "유니버설 스튜디오", lat: 34.1381, lng: -118.3534, icon: "fa-film", note: "온종일 파크 이용" },
+                    { id: "2-5", time: "14:00", name: "Pink's Hot Dogs (시티워크)", lat: 34.1365, lng: -118.3533, icon: "fa-hotdog", note: "간식 후 파크 재입장" },
+                    { id: "2-6", time: "19:00", name: "The Kickin' Crab 디너", lat: 34.0689, lng: -118.3052, icon: "fa-shrimp", note: "우버로 K-town 직행" }
+                ]
+            },
+            3: { day: 3, date: "9.24 (목)", title: "할리우드 & 스테이크", subtitle: "알프레드 커피 → 테슬라 픽업 → 순두부 → 명예의거리 → 천문대 → 로리스",
+                places: [
+                    { id: "3-1", time: "08:30", name: "Alfred Coffee", lat: 34.0618, lng: -118.3002, icon: "fa-mug-hot", note: "호텔 1층 모닝 커피" },
+                    { id: "3-2", time: "09:30", name: "Hertz 테슬라 픽업", lat: 34.0760, lng: -118.3440, icon: "fa-car", note: "Beverly/La Brea 지점 ($127.03)" },
+                    { id: "3-3", time: "10:30", name: "북창동 순두부 본점", lat: 34.0618, lng: -118.2977, icon: "fa-bowl-rice", note: "점심 콤보 식사" },
+                    { id: "3-4", time: "13:00", name: "할리우드 명예의 거리", lat: 34.1016, lng: -118.3401, icon: "fa-star", note: "워크 오브 페임 관광" },
+                    { id: "3-5", time: "16:30", name: "그리피스 천문대", lat: 34.1184, lng: -118.3004, icon: "fa-moon", note: "일몰 감상" },
+                    { id: "3-6", time: "19:00", name: "Lawry's The Prime Rib", lat: 34.0645, lng: -118.3762, icon: "fa-utensils", note: "7시 예약 확정 디너" }
+                ]
+            },
+            4: { day: 4, date: "9.25 (금)", title: "서핑 & 코스트 드라이브", subtitle: "산타모니카 서핑 → 인앤아웃 → PCH 해안도로 → 팬다 익스프레스",
+                places: [
+                    { id: "4-1", time: "08:30", name: "더 라인 호텔 출발", lat: 34.0618, lng: -118.3002, icon: "fa-car", note: "테슬라 이동" },
+                    { id: "4-2", time: "09:45", name: "서핑 미팅 포인트", lat: 34.0051, lng: -118.4891, icon: "fa-location-dot", note: "20 Bicknell Ave (스쿨버스 앞)" },
+                    { id: "4-3", time: "10:00", name: "그룹 서핑 레슨", lat: 34.0040, lng: -118.4900, icon: "fa-water", note: "2시간 강습 진행" },
+                    { id: "4-4", time: "13:00", name: "In-N-Out Burger", lat: 34.0150, lng: -118.4900, icon: "fa-burger", note: "가성비 점심" },
+                    { id: "4-5", time: "14:30", name: "산타모니카 피어 구경", lat: 34.0100, lng: -118.4960, icon: "fa-umbrella-beach", note: "해변 산책" },
+                    { id: "4-6", time: "16:30", name: "PCH 선셋 드라이브", lat: 34.0390, lng: -118.5724, icon: "fa-sun", note: "말리부 방향 해안도로" },
+                    { id: "4-7", time: "18:30", name: "Panda Express", lat: 34.0594, lng: -118.4191, icon: "fa-bowl-rice", note: "센추리시티 몰 디너" }
+                ]
+            },
+            5: { day: 5, date: "9.26 (토)", title: "쇼핑 & 출국", subtitle: "차량 반납 → 더 그로브 → 파머스마켓 → 베벌리힐스 → 공항(19:00)",
+                places: [
+                    { id: "5-1", time: "09:00", name: "더 라인 호텔 출발", lat: 34.0618, lng: -118.3002, icon: "fa-car", note: "반납 지점 이동" },
+                    { id: "5-2", time: "09:30", name: "Hertz 렌터카 반납", lat: 34.0760, lng: -118.3440, icon: "fa-key", note: "비벌리 라브리아 지점" },
+                    { id: "5-3", time: "10:30", name: "더 그로브 & 파머스마켓", lat: 34.0722, lng: -118.3581, icon: "fa-bag-shopping", note: "20번 버스 이동 및 쇼핑" },
+                    { id: "5-4", time: "14:30", name: "베벌리힐스 구경", lat: 34.0696, lng: -118.4053, icon: "fa-gem", note: "로데오 드라이브 산책" },
+                    { id: "5-5", time: "17:30", name: "호텔 짐 수령", lat: 34.0618, lng: -118.3002, icon: "fa-suitcase", note: "복귀 후 짐 찾기" },
+                    { id: "5-6", time: "19:00", name: "LAX 공항으로 출발", lat: 33.9416, lng: -118.4085, icon: "fa-plane-departure", note: "우버 탑승. 귀국" }
+                ]
+            }
+        };
+
+        window.onload = async function() {
+            initMap();
+            
+            const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+            if (firebaseConfig) {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                try {
+                    const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                    if (token) await signInWithCustomToken(auth, token);
+                    else await signInAnonymously(auth);
+                    
+                    userId = auth.currentUser.uid;
+                    listenToDatabase();
+                } catch(e) {
+                    console.error("Auth failed", e);
+                    appData = JSON.parse(JSON.stringify(baseTripData));
+                    window.switchDay(currentDay);
+                }
+            } else {
+                appData = JSON.parse(JSON.stringify(baseTripData));
+                window.switchDay(currentDay);
+            }
+            setupInteractions();
+        };
+
+        function listenToDatabase() {
+            if(!db || !userId) return;
+            const docRef = doc(db, 'artifacts', appId, 'users', userId, 'trips', 'la_pro_trip');
+            
+            onSnapshot(docRef, (snapshot) => {
+                if (snapshot.exists()) appData = snapshot.data().tripData;
+                else { appData = JSON.parse(JSON.stringify(baseTripData)); if (!isSyncing) syncToCloud(); }
+                window.switchDay(currentDay);
+            }, (error) => {
+                console.error("Listen error", error);
+                if(Object.keys(appData).length === 0) appData = JSON.parse(JSON.stringify(baseTripData));
+                window.switchDay(currentDay);
+            });
+        }
+
+        async function syncToCloud() {
+            if (!db || !userId) return;
+            isSyncing = true;
+            document.getElementById('cloud-indicator').innerHTML = '<i class="fa-solid fa-cloud-arrow-up text-black sync-spin"></i> Saving...';
+            document.getElementById('sync-status').classList.remove('hidden');
+            
+            try {
+                await setDoc(docRef = doc(db, 'artifacts', appId, 'users', userId, 'trips', 'la_pro_trip'), { tripData: appData, updatedAt: new Date().toISOString() });
+                setTimeout(() => {
+                    document.getElementById('cloud-indicator').innerHTML = '<i class="fa-solid fa-cloud-check text-black"></i> Up to date';
+                    document.getElementById('sync-status').classList.add('hidden');
+                    isSyncing = false;
+                }, 800);
+            } catch (e) { isSyncing = false; }
+        }
+        
+        window.resetData = function() {
+            appData = JSON.parse(JSON.stringify(baseTripData));
+            syncToCloud(); window.switchDay(currentDay);
+        };
+
+        function initMap() {
+            map = L.map('map', { zoomControl: false }).setView([34.0497, -118.2541], 12);
+            L.control.zoom({ position: 'bottomright' }).addTo(map);
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: '&copy; CARTO' }).addTo(map);
+
+            markersGroup = L.layerGroup().addTo(map);
+            polylineGroup = L.layerGroup().addTo(map);
+            dangerZonesLayer = L.layerGroup().addTo(map);
+            poiLayer = L.layerGroup().addTo(map);
+            restroomLayer = L.layerGroup().addTo(map);
+
+            setupDangerZones();
+            setupPOIs();
+            setupRestrooms();
+        }
+
+        function setupDangerZones() {
+            // 1. Skid Row
+            L.polygon([[34.048, -118.247], [34.044, -118.241], [34.037, -118.239], [34.034, -118.245], [34.043, -118.251]], 
+                { color: '#000', weight: 1, fillColor: '#ef4444', fillOpacity: 0.2 }).bindTooltip("⚠️ Skid Row").addTo(dangerZonesLayer);
+            
+            // 2. East Hollywood (Santa Monica Blvd / Western Ave area)
+            L.polygon([[34.095, -118.315], [34.095, -118.290], [34.085, -118.290], [34.085, -118.315]], 
+                { color: '#000', weight: 1, fillColor: '#ef4444', fillOpacity: 0.2 }).bindTooltip("⚠️ 할리우드 동쪽 우범지역").addTo(dangerZonesLayer);
+
+            // 3. South Figueroa St.
+            L.polyline([[34.043, -118.267], [34.010, -118.282]], 
+                { color: '#ef4444', weight: 10, opacity: 0.3 }).bindTooltip("⚠️ South Figueroa St 주의").addTo(dangerZonesLayer);
+        }
+
+        function setupPOIs() {
+            const pois = [
+                { lat: 34.062, lng: -118.297, name: "Target (K-Town)", type: "mart", color: "bg-red-500", icon: "fa-cart-shopping" },
+                { lat: 34.070, lng: -118.344, name: "Trader Joe's", type: "mart", color: "bg-orange-500", icon: "fa-basket-shopping" },
+                { lat: 34.061, lng: -118.301, name: "EV 충전소 (더라인)", type: "ev", color: "bg-green-500", icon: "fa-bolt" },
+                { lat: 34.102, lng: -118.341, name: "할리우드 공영 주차장", type: "parking", color: "bg-blue-500", icon: "fa-square-parking" },
+                { lat: 34.013, lng: -118.496, name: "산타모니카 주차장 4", type: "parking", color: "bg-blue-500", icon: "fa-square-parking" },
+                { lat: 34.072, lng: -118.358, name: "더 그로브 주차장", type: "parking", color: "bg-blue-500", icon: "fa-square-parking" },
+                // 새로 추가된 주차장 핀
+                { lat: 34.1015, lng: -118.3395, name: "할리우드 워크 주차장", type: "parking", color: "bg-blue-500", icon: "fa-square-parking" },
+                { lat: 34.0628, lng: -118.2989, name: "더 라인 인근 공영주차장", type: "parking", color: "bg-blue-500", icon: "fa-square-parking" }
+            ];
+
+            pois.forEach(p => {
+                const iconHtml = L.divIcon({
+                    className: 'custom-poi',
+                    html: `<div class="w-5 h-5 ${p.color} text-white rounded-full flex items-center justify-center text-[10px] shadow-sm border border-white"><i class="fa-solid ${p.icon}"></i></div>`,
+                    iconSize: [20, 20], iconAnchor: [10, 10]
+                });
+                L.marker([p.lat, p.lng], { icon: iconHtml }).bindTooltip(p.name, {className: 'text-[10px] font-bold', direction: 'top'}).addTo(poiLayer);
+            });
+        }
+
+        function setupRestrooms() {
+            const restrooms = [
+                { lat: 34.009, lng: -118.496, name: "산타모니카 해변 화장실" },
+                { lat: 34.015, lng: -118.498, name: "오션파크 공용 화장실" },
+                { lat: 34.1186, lng: -118.3004, name: "그리피스 천문대 내부 화장실" },
+                { lat: 34.0506, lng: -118.2489, name: "그랜드 센트럴 마켓 화장실" },
+                { lat: 34.0722, lng: -118.3581, name: "더 그로브 공용 화장실" },
+                { lat: 34.1016, lng: -118.3401, name: "오베이션 할리우드 화장실" },
+                { lat: 34.0618, lng: -118.3002, name: "더 라인 호텔 로비 화장실" },
+                { lat: 34.048, lng: -118.254, name: "퍼싱 스퀘어 공용 화장실" },
+                { lat: 34.138, lng: -118.353, name: "유니버설 시티워크 화장실" }
+            ];
+
+            restrooms.forEach(r => {
+                const iconHtml = L.divIcon({
+                    className: 'custom-poi',
+                    html: `<div class="w-4 h-4 bg-teal-500 text-white rounded-full flex items-center justify-center text-[8px] shadow-sm border border-white"><i class="fa-solid fa-restroom"></i></div>`,
+                    iconSize: [16, 16], iconAnchor: [8, 8]
+                });
+                L.marker([r.lat, r.lng], { icon: iconHtml }).bindTooltip(r.name, {className: 'text-[10px] font-bold', direction: 'top'}).addTo(restroomLayer);
+            });
+        }
+
+        window.toggleLayers = function() {
+            const showDanger = document.getElementById('toggle-skidrow').checked;
+            const showPOI = document.getElementById('toggle-pois').checked;
+            const showRestroom = document.getElementById('toggle-restrooms').checked;
+            
+            showDanger ? map.addLayer(dangerZonesLayer) : map.removeLayer(dangerZonesLayer);
+            showPOI ? map.addLayer(poiLayer) : map.removeLayer(poiLayer);
+            showRestroom ? map.addLayer(restroomLayer) : map.removeLayer(restroomLayer);
+        };
+
+        window.requestDelete = function(id, event) {
+            event.stopPropagation();
+            placeToDeleteId = id;
+            document.getElementById('delete-modal').classList.replace('hidden', 'flex');
+        };
+
+        window.switchDay = function(dayNum) {
+            currentDay = dayNum;
+            document.querySelectorAll('.day-tab').forEach((tab, idx) => {
+                if (idx + 1 === dayNum) tab.className = "day-tab w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs bg-white text-black shadow-md flex-shrink-0 transition-all";
+                else tab.className = "day-tab w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs bg-gray-900 text-gray-400 flex-shrink-0 transition-all";
+            });
+            renderDay(dayNum);
+        };
+
+        function renderDay(dayNum) {
+            if(!appData[dayNum]) return;
+            const data = appData[dayNum];
+            
+            document.getElementById('summary-date').textContent = data.date;
+            document.getElementById('summary-title').textContent = data.title;
+            document.getElementById('summary-subtitle').textContent = data.subtitle;
+
+            const container = document.getElementById('places-container');
+            container.innerHTML = "";
+            markersGroup.clearLayers(); polylineGroup.clearLayers();
+            const latLngs = [];
+
+            data.places.forEach((place, index) => {
+                latLngs.push([place.lat, place.lng]);
+
+                const card = document.createElement('div');
+                card.setAttribute('data-id', place.id);
+                card.className = "bg-white p-3 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-3 cursor-grab hover:border-gray-300 transition-all group";
+
+                // 지도 이동(Fly) 기능과 수정(Edit) 기능을 UI적으로 분리
+                card.innerHTML = `
+                    <div class="cursor-grab text-gray-300 hover:text-black px-1 handle flex-shrink-0"><i class="fa-solid fa-grip-vertical"></i></div>
+                    <div onclick="window.flyToPlace(${place.lat}, ${place.lng})" class="w-9 h-9 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center flex-shrink-0 text-black cursor-pointer hover:bg-black hover:text-white transition-colors" title="지도에서 보기">
+                        <i class="fa-solid ${place.icon} text-sm"></i>
+                    </div>
+                    <div class="flex-1 min-w-0 pr-2 cursor-pointer" onclick="window.openEditPlaceModal('${place.id}')" title="클릭하여 일정/메모 수정">
+                        <h4 class="font-bold text-gray-900 text-sm truncate">${place.name}</h4>
+                        <div class="flex items-center gap-2 text-[10px] text-gray-500 font-medium mt-0.5">
+                            <span class="text-black bg-gray-100 px-1.5 py-0.5 rounded font-bold ${place.fixedTime ? 'ring-1 ring-black/20' : ''}">${place.time}</span>
+                            <span class="truncate">${place.note}</span>
+                        </div>
+                    </div>
+                    <button onclick="requestDelete('${place.id}', event)" class="w-8 h-8 rounded-full bg-red-50 text-red-500 flex items-center justify-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity flex-shrink-0 cursor-pointer">
+                        <i class="fa-solid fa-trash text-[11px]"></i>
+                    </button>
+                `;
+                container.appendChild(card);
+
+                // Minimalist Marker
+                const markerIcon = L.divIcon({
+                    className: 'custom-marker',
+                    html: `<div class="w-6 h-6 bg-black text-white rounded-full flex items-center justify-center font-bold text-[10px] shadow-lg border-2 border-white">${index + 1}</div>`,
+                    iconSize: [24, 24], iconAnchor: [12, 12]
+                });
+                L.marker([place.lat, place.lng], { icon: markerIcon }).bindTooltip(place.name, {direction: 'top', className: 'text-xs font-bold'}).addTo(markersGroup);
+            });
+
+            if (latLngs.length > 1) L.polyline(latLngs, { color: '#000', weight: 2, opacity: 0.6, dashArray: '5, 5' }).addTo(polylineGroup);
+            if (latLngs.length > 0) map.fitBounds(L.latLngBounds(latLngs), { padding: [30, 30] });
+
+            // SortableJS initialization optimized for mobile
+            if(sortableInstance) sortableInstance.destroy();
+            sortableInstance = new Sortable(container, {
+                animation: 200,
+                delay: 150, delayOnTouchOnly: true, // Crucial for mobile scrolling
+                ghostClass: 'sortable-ghost', dragClass: 'sortable-drag',
+                handle: '.handle',
+                onEnd: function () {
+                    const newOrderIds = Array.from(container.children).map(c => c.getAttribute('data-id'));
+                    const oldPlaces = [...appData[currentDay].places];
+                    const newPlaces = newOrderIds.map(id => oldPlaces.find(p => p.id === id));
+                    
+                    // Trigger AX (Auto-sync times based on distance)
+                    appData[currentDay].places = autoCalculateTimes(newPlaces);
+                    syncToCloud(); renderDay(currentDay);
+                }
+            });
+        }
+
+        // AX Engine: Distance based time calculation
+        function autoCalculateTimes(places) {
+            if (places.length < 2) return places;
+            const parseTime = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+            const formatTime = (mins) => { const h=Math.floor(mins/60)%24, m=Math.floor(mins%60); return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`; };
+            const getDist = (l1, n1, l2, n2) => {
+                const dLat = (l2-l1)*Math.PI/180, dLon = (n2-n1)*Math.PI/180;
+                const a = Math.sin(dLat/2)**2 + Math.cos(l1*Math.PI/180)*Math.cos(l2*Math.PI/180)*Math.sin(dLon/2)**2;
+                return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); // km
+            };
+
+            let currentMins = parseTime(places[0].time);
+            for (let i = 1; i < places.length; i++) {
+                // 사용자가 고정한 시간(fixedTime)이 있다면 그 시간으로 덮어씌우고 다음 계산의 기준으로 삼음
+                if (places[i].fixedTime) {
+                    currentMins = parseTime(places[i].time);
+                    continue; 
+                }
+                currentMins += 90; // Default stay time: 1.5 hrs
+                const distKm = getDist(places[i-1].lat, places[i-1].lng, places[i].lat, places[i].lng);
+                const travelMins = Math.max(15, Math.round((distKm / 30) * 60)); // Assumes 30km/h
+                currentMins += travelMins;
+                places[i].time = formatTime(currentMins);
+            }
+            return places;
+        }
+
+        window.flyToPlace = function(lat, lng) {
+            map.flyTo([lat, lng], 15, { duration: 0.8 });
+        };
+
+        document.getElementById('confirm-delete-btn').onclick = function() {
+            if(!placeToDeleteId) return;
+            appData[currentDay].places = appData[currentDay].places.filter(p => p.id !== placeToDeleteId);
+            appData[currentDay].places = autoCalculateTimes(appData[currentDay].places); // Re-run AX
+            document.getElementById('delete-modal').classList.replace('flex', 'hidden');
+            syncToCloud(); renderDay(currentDay);
+            placeToDeleteId = null;
+        };
+
+        window.openAddPlaceModal = () => { document.getElementById('add-modal').classList.replace('hidden', 'flex'); };
+        window.closeAddPlaceModal = () => { 
+            document.getElementById('add-modal').classList.replace('flex', 'hidden');
+            document.getElementById('new-place-name').value = '';
+            document.getElementById('new-place-time').value = '';
+            document.getElementById('new-place-note').value = '';
+            if(document.getElementById('add-place-btn')) {
+                document.getElementById('add-place-btn').innerText = '추가하기';
+                document.getElementById('add-place-btn').disabled = false;
+            }
+        };
+
+        window.saveNewPlace = async function() {
+            const name = document.getElementById('new-place-name').value.trim();
+            const time = document.getElementById('new-place-time').value;
+            const note = document.getElementById('new-place-note').value.trim();
+            const selectedIcon = document.querySelector('input[name="new-icon"]:checked').value;
+            const addBtn = document.getElementById('add-place-btn');
+            
+            if(!name) return;
+            
+            // 시각적 피드백 제공 (위치 검색 중)
+            addBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 위치 검색 중...';
+            addBtn.disabled = true;
+            
+            const places = appData[currentDay].places;
+            const lastPlace = places.length > 0 ? places[places.length-1] : {lat: 34.05, lng: -118.25};
+            
+            let lat = lastPlace.lat + (Math.random() * 0.01 - 0.005); 
+            let lng = lastPlace.lng + (Math.random() * 0.01 - 0.005);
+            let finalNote = note || "사용자 추가 일정";
+
+            try {
+                // OpenStreetMap 무료 지오코딩 API를 사용하여 실제 좌표 검색 (API 키 불필요)
+                const query = encodeURIComponent(name + ' Los Angeles');
+                const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}&limit=1`);
+                const data = await response.json();
+                
+                if(data && data.length > 0) {
+                    lat = parseFloat(data[0].lat);
+                    lng = parseFloat(data[0].lon);
+                } else {
+                    // 검색 실패 시 조용히 메모란에만 안내 문구 추가 (alert 미사용)
+                    finalNote = (note ? note + " | " : "") + "📍 정확한 위치를 찾지 못해 임시로 표시되었습니다.";
+                }
+            } catch(e) {
+                finalNote = (note ? note + " | " : "") + "📍 지도 검색 서버 오류로 임시 배치되었습니다.";
+            }
+            
+            const newPlace = {
+                id: 'custom-' + Date.now(),
+                time: time || "00:00",
+                fixedTime: !!time,
+                name: name,
+                note: finalNote,
+                icon: selectedIcon,
+                lat: lat, 
+                lng: lng
+            };
+            
+            places.push(newPlace);
+            appData[currentDay].places = autoCalculateTimes(places); 
+            
+            addBtn.innerText = "추가하기";
+            addBtn.disabled = false;
+            closeAddPlaceModal();
+            syncToCloud(); renderDay(currentDay);
+        };
+
+        // 일정 수정(Edit) 기능
+        window.openEditPlaceModal = function(id) {
+            const place = appData[currentDay].places.find(p => p.id === id);
+            if(!place) return;
+            
+            document.getElementById('edit-place-id').value = place.id;
+            document.getElementById('edit-place-name').value = place.name;
+            document.getElementById('edit-place-time').value = place.time;
+            document.getElementById('edit-place-note').value = place.note;
+            
+            // 기존 아이콘 라디오 버튼 세팅
+            const iconRadios = document.getElementsByName('edit-icon');
+            iconRadios.forEach(radio => {
+                if(radio.value === place.icon) radio.checked = true;
+            });
+            
+            document.getElementById('edit-modal').classList.replace('hidden', 'flex');
+        };
+
+        window.closeEditPlaceModal = () => { document.getElementById('edit-modal').classList.replace('flex', 'hidden'); };
+
+        window.saveEditPlace = function() {
+            const id = document.getElementById('edit-place-id').value;
+            const name = document.getElementById('edit-place-name').value.trim();
+            const time = document.getElementById('edit-place-time').value;
+            const note = document.getElementById('edit-place-note').value.trim();
+            const selectedIcon = document.querySelector('input[name="edit-icon"]:checked').value;
+            if(!name) return;
+
+            const place = appData[currentDay].places.find(p => p.id === id);
+            if(place) {
+                place.name = name;
+                place.note = note;
+                place.icon = selectedIcon; // 변경된 아이콘 저장
+                if (place.time !== time) {
+                    place.time = time;
+                    place.fixedTime = true; // 수동으로 변경한 시간은 드래그 시 변하지 않도록 고정
+                }
+            }
+            
+            appData[currentDay].places = autoCalculateTimes(appData[currentDay].places);
+            closeEditPlaceModal();
+            syncToCloud(); renderDay(currentDay);
+        };
+
+        window.openBudgetModal = () => { document.getElementById('budget-modal').classList.replace('hidden', 'flex'); };
+        window.closeBudgetModal = () => { document.getElementById('budget-modal').classList.replace('flex', 'hidden'); };
+        
+        // 팁 모달 로직 연결
+        window.openTipsModal = () => { document.getElementById('tips-modal').classList.replace('hidden', 'flex'); };
+        window.closeTipsModal = () => { document.getElementById('tips-modal').classList.replace('flex', 'hidden'); };
+
+        let currentTip = 18;
+        function setupInteractions() {
+            window.setTip = (percent) => {
+                currentTip = percent;
+                document.querySelectorAll('.tip-btn').forEach(btn => {
+                    btn.classList.replace('bg-black', 'bg-gray-100'); btn.classList.replace('text-white', 'text-gray-600');
+                    if(btn.innerText.includes(percent)) { btn.classList.replace('bg-gray-100', 'bg-black'); btn.classList.replace('text-gray-600', 'text-white'); }
+                });
+                calculateTip();
+            };
+            window.calculateTip = () => {
+                const amt = parseFloat(document.getElementById('bill-amount').value) || 0;
+                document.getElementById('tip-total-result').innerText = `$${(amt * (1 + currentTip/100)).toFixed(2)}`;
+            };
+        }
+    </script>
+</body>
+</html>
